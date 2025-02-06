@@ -2,7 +2,7 @@ import argparse
 import tellurium as te
 import csv
 from equilibrator_api import ComponentContribution
-from bioservices import Rhea
+from bioservices import *
 
 class Annotate:
     def __init__(self):
@@ -46,10 +46,13 @@ class Annotate:
     
     def get_rhea_reaction(self, chebi_ids):
         """Queries Rhea for a reaction based on ChEBI IDs."""
+        rh = Rhea(verbose=False)
         try:
-            reaction = self.rhea.get_reaction_by_chebi(chebi_ids)
-            if reaction:
-                return reaction[0]  # Return the first matching Rhea ID
+            query = " ".join(chebi_ids)
+            print(query)
+            data = rh.search(query, limit=3, columns='rhea-id')
+            if not data.empty:
+                return data.iloc[0][0]  # Return the first matching Rhea ID
         except Exception as e:
             print(f"Error querying Rhea: {e}")
         return None
@@ -80,19 +83,30 @@ class Annotate:
             confidence_scores.append((spc, relid, identities, score))
         
         return annotations, confidence_scores
-    
+
     def write_annotations(self, file_path, annotations, enzyme_annotations, databases):
-        """Appends annotations to the input file."""
+        """Appends annotations to the original file and writes them to a new file named file_path_database."""
         db_links = {
             'kegg': "http://identifiers.org/kegg/{}",
             'bigg.metabolite': "http://bigg.ucsd.edu/universal/metabolites/{}",
             'chebi': "https://www.ebi.ac.uk/chebi/searchId.do?chebiId={}",
             'hmdb': "https://hmdb.ca/metabolites/{}",
-            'metacyc.compound': "https://metacyc.org/compound?orgid=META&id={}"
+            'metacyc.compound': "https://metacyc.org/compound?orgid=META&id={}",
         }
         
-        with open(file_path, 'a') as file:
-            file.write('\n')  # Add a newline before appending
+        # Find the last occurrence of '.' to split the extension
+        dot_index = file_path.rfind('.')
+
+        if dot_index != -1:  # If there's an extension
+            new_file_path = f"{file_path[:dot_index]}_{databases}{file_path[dot_index:]}"
+        else:  # If there's no extension
+            new_file_path = f"{file_path}_{databases}"
+        
+        with open(file_path, 'r') as original_file:
+            file_contents = original_file.read()  # Read all original contents
+
+        with open(new_file_path, 'w') as file:  # 'w' creates a new file or overwrites it
+            file.write(file_contents)  # Write original contents to new file
             for spc, relid, identities in annotations:
                 file.write(f'{spc} is "{relid}";\n')
                 for db, identity in identities.items():
@@ -101,11 +115,12 @@ class Annotate:
                 file.write(f'{enzyme} is "{enzyme}";\n')
                 if rhea_id:
                     file.write(f'{enzyme} identity "https://www.rhea-db.org/rhea/{rhea_id}";\n')
+
     
     def write_confidence_metrics(self, confidence_scores):
         """Writes confidence scores to a CSV file."""
         with open("confidence_metrics.csv", 'w', newline='') as csvfile:
-            fieldnames = ['Species', 'relid', 'Identities', 'Confidence Score']
+            fieldnames = ['Given ID', 'Display Name', 'Annotated Identities', 'Confidence Score']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             for species, relid, identities, score in confidence_scores:
